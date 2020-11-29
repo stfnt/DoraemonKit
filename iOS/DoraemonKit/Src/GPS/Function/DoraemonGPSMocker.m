@@ -11,7 +11,7 @@
 
 @interface DoraemonGPSMocker()<CLLocationManagerDelegate>
 
-@property (nonatomic, strong) NSMutableDictionary *locationMonitor;
+@property (nonatomic, strong) NSMapTable *locationMonitor;
 @property (nonatomic,strong) CLLocation *oldLocation;
 @property (nonatomic, strong) CLLocation *pointLocation;
 @property (nonatomic,strong) NSTimer *simTimer;
@@ -36,7 +36,7 @@
 - (instancetype)init{
     self = [super init];
     if(self){
-        _locationMonitor = [NSMutableDictionary new];
+        _locationMonitor = [NSMapTable strongToWeakObjectsMapTable];
         _isMocking = NO;
     }
     return self;
@@ -72,11 +72,10 @@
 }
 
 - (void)dispatchLocationsToAll:(NSArray*)locations{
-    for (NSString *key in _locationMonitor.allKeys) {
+    for (NSString *key in _locationMonitor.keyEnumerator) {
         if ([key hasSuffix:@"_binder"]) {
             NSString *binderKey = key;
             CLLocationManager *binderManager = [_locationMonitor objectForKey:binderKey];
-            
             [self dispatchLocationUpdate:binderManager locations:locations];
         }
     }
@@ -100,20 +99,33 @@
 }
 
 #pragma mark - CLLocationManagerDelegate
+// 这个过期接口不能删掉，防止应用方实现了这个方法
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-implementations"
 -(void)locationManager:(CLLocationManager *)manager didUpdateToLocation:(CLLocation *)newLocation fromLocation:(CLLocation *)oldLocation{
-    [self enumDelegate:manager block:^(id<CLLocationManagerDelegate> delegate) {
-        if ([delegate respondsToSelector:@selector(locationManager:didUpdateToLocation:fromLocation:)]) {
-            [delegate locationManager:manager didUpdateToLocation:newLocation fromLocation:oldLocation];
-        }
-    }];
+    if (!self.isMocking){
+        [self enumDelegate:manager block:^(id<CLLocationManagerDelegate> delegate) {
+            if ([delegate respondsToSelector:@selector(locationManager:didUpdateToLocation:fromLocation:)]) {
+                #pragma clang diagnostic push
+                #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                [delegate locationManager:manager didUpdateToLocation:newLocation fromLocation:oldLocation];
+                #pragma clang diagnostic pop
+            }
+        }];
+    }
 }
+#pragma clang diagnostic pop
 
 - (void)locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray *)locations {
     if (!self.isMocking) {
-        [self dispatchLocationUpdate:manager locations:locations];
+        [self enumDelegate:manager block:^(id<CLLocationManagerDelegate> delegate) {
+            if ([delegate respondsToSelector:@selector(locationManager:didUpdateLocations:)]) {
+                [delegate locationManager:manager didUpdateLocations:locations];
+            }
+        }];
     }
 }
-
+    
 - (void)locationManager:(CLLocationManager *)manager didUpdateHeading:(CLHeading *)newHeading {
     [self enumDelegate:manager block:^(id<CLLocationManagerDelegate> delegate) {
         if ([delegate respondsToSelector:@selector(locationManager:didUpdateHeading:)]) {
@@ -156,6 +168,22 @@
     [self enumDelegate:manager block:^(id<CLLocationManagerDelegate> delegate) {
         if ([delegate respondsToSelector:@selector(locationManager:rangingBeaconsDidFailForRegion:withError:)]) {
             [delegate locationManager:manager rangingBeaconsDidFailForRegion:region withError:error];
+        }
+    }];
+}
+
+- (void)locationManager:(CLLocationManager *)manager didRangeBeacons:(NSArray<CLBeacon *> *)beacons satisfyingConstraint:(CLBeaconIdentityConstraint *)beaconConstraint API_AVAILABLE(ios(13.0)) {
+    [self enumDelegate:manager block:^(id<CLLocationManagerDelegate> delegate) {
+        if ([delegate respondsToSelector:@selector(locationManager:didRangeBeacons:satisfyingConstraint:)]) {
+            [delegate locationManager:manager didRangeBeacons:beacons satisfyingConstraint:beaconConstraint];
+        }
+    }];
+}
+
+- (void)locationManager:(CLLocationManager *)manager didFailRangingBeaconsForConstraint:(CLBeaconIdentityConstraint *)beaconConstraint error:(NSError *)error API_AVAILABLE(ios(13.0)) {
+    [self enumDelegate:manager block:^(id<CLLocationManagerDelegate> delegate) {
+        if ([delegate respondsToSelector:@selector(locationManager:didFailRangingBeaconsForConstraint:error:)]) {
+            [delegate locationManager:manager didFailRangingBeaconsForConstraint:beaconConstraint error:error];
         }
     }];
 }
@@ -204,6 +232,14 @@ monitoringDidFailForRegion:(nullable CLRegion *)region
     }];
 }
 
+-(void)locationManagerDidChangeAuthorization:(CLLocationManager *)manager {
+    [self enumDelegate:manager block:^(id<CLLocationManagerDelegate> delegate) {
+        if ([delegate respondsToSelector:@selector(locationManagerDidChangeAuthorization:)]) {
+            [delegate locationManagerDidChangeAuthorization:manager];
+        }
+    }];
+}
+
 - (void)locationManager:(CLLocationManager *)manager didStartMonitoringForRegion:(CLRegion *)region{
     [self enumDelegate:manager block:^(id<CLLocationManagerDelegate> delegate) {
         if ([delegate respondsToSelector:@selector(locationManager:didStartMonitoringForRegion:)]) {
@@ -244,8 +280,8 @@ monitoringDidFailForRegion:(nullable CLRegion *)region
     }];
 }
 
-
-
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 -(void)dispatchLocationUpdate:(CLLocationManager *)manager locations:(NSArray*)locations{
     NSString *key = [NSString stringWithFormat:@"%p_delegate",manager];
     id<CLLocationManagerDelegate> delegate = [_locationMonitor objectForKey:key];
@@ -256,4 +292,6 @@ monitoringDidFailForRegion:(nullable CLRegion *)region
         self.oldLocation = locations.firstObject;
     }
 }
+#pragma clang diagnostic pop
 @end
+
